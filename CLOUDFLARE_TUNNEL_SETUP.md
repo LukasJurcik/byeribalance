@@ -1,92 +1,59 @@
 # Cloudflare Tunnel Setup
 
-This project uses a Cloudflare Tunnel to load `main.js` from the local Mac during development. When the tunnel is unavailable, Webflow loads the production copy from jsDelivr.
+This project uses a shared Cloudflare Tunnel to load `main.js` from the local Mac during development. When the tunnel is unavailable, Webflow loads the production copy from jsDelivr.
 
-## 1. Install Cloudflare
+One single tunnel (called **`tunnel`** in Cloudflare) serves **every** local project on this Mac. Each project just gets its own subdomain and its own local port — you never need to create a new tunnel or install a second service.
 
-Install the command-line client with Homebrew:
+## Projects currently using this tunnel
 
-```bash
-brew install cloudflared
-```
+Add a row here whenever a new project joins the shared tunnel, so it's easy to see which ports are already taken.
 
-In Cloudflare, create a tunnel named `community`. Copy the connector install command from the tunnel dashboard and run it in Terminal:
+| Project | Domain | Local port |
+|---|---|---|
+| byeribalance (this repo) | `byeribalance.studioprimal.com` | `8080` |
+| Community | `community.studioprimal.com` | `5500` |
 
-```bash
-sudo cloudflared service install YOUR_TUNNEL_TOKEN
-```
+## Adding a new project to the tunnel
 
-The token is private. Never commit it or share it. If it is exposed, use **Refresh token** in Cloudflare and reinstall the service with the new token.
+Do this once per new project — not per Mac, and not by creating a new tunnel.
 
-## 2. Connect the domain
-
-This project uses:
-
-```text
-community.studioprimal.com
-```
-
-If `studioprimal.com` is registered at GoDaddy:
-
-1. Add `studioprimal.com` to the Cloudflare account.
-2. Keep the imported Webflow, Zoho, and verification DNS records.
-3. In GoDaddy, open **DNS → Nameservers → Change nameservers**.
-4. Replace the GoDaddy nameservers with the two nameservers Cloudflare assigns. For this setup they are:
-
+1. Pick a local port that isn't already used by another project in the table above.
+2. In Cloudflare, go to:
    ```text
-   heidi.ns.cloudflare.com
-   merlin.ns.cloudflare.com
+   Tunnels → tunnel → Routes → Add route → Published application
+   Subdomain: <new project name>
+   Domain: studioprimal.com
+   Service URL: http://localhost:<the port you picked>
    ```
+3. Add a row for it to the table above.
+4. Set up that project's daily workflow and Webflow loader the same way this document does for `byeribalance` below, swapping in its own domain, port, and folder.
 
-5. Wait for Cloudflare to show the domain as **Active**.
+**Never run `cloudflared service install` again.** Only one of those services can exist on a Mac at a time — that's what the shared tunnel is for. If you ever see a "service is already installed" error, that's the signal to add a route instead of installing anything new.
 
-Do not edit the automatic NS records in GoDaddy's DNS record table. Change nameservers from the Nameservers tab instead.
+## This project's setup (byeribalance)
 
-## 3. Add the tunnel route
+The sections below show how the tunnel is used day-to-day for this specific project. Use them as the template when setting up a new project (step 4 above).
 
-In Cloudflare, open:
+### Daily workflow
 
-```text
-Tunnels → community → Routes → Add route → Published application
-```
-
-Use:
-
-```text
-Subdomain: community
-Domain: studioprimal.com
-Path: leave empty
-Service URL: http://localhost:5500
-```
-
-This creates the public hostname:
-
-```text
-https://community.studioprimal.com
-```
-
-## 4. Start local development
-
-Open Terminal and run both commands, in this order:
+Open Terminal and run:
 
 ```bash
-cd ~/Desktop/Community
-python3 -m http.server 5500
+cd ~/Desktop/byeribalance
+python3 -m http.server 8080
 ```
 
-The first command changes Terminal into the project folder. The second command starts the local web server on port `5500`. Keep this Terminal window running while you develop.
+Keep this Terminal window open while you develop. Stop it with `Control + C` when you're done — Webflow will then fall back to the CDN version.
 
 Test the tunnel by opening:
 
 ```text
-https://community.studioprimal.com/main.js
+https://byeribalance.studioprimal.com/main.js
 ```
 
-The Cloudflare connector runs as a background service and should reconnect after a Mac restart. The local Python server still needs to be running whenever local development files should be available.
+### Configure Webflow
 
-## 5. Configure Webflow
-
-In **Webflow → Site settings → Custom code → Footer**, paste this code before publishing. Footer placement makes sure the page and Webflow dependencies have loaded first.
+In **Webflow → Site settings → Custom code → Footer**, paste this before publishing:
 
 ```html
 <!--
@@ -98,8 +65,8 @@ In **Webflow → Site settings → Custom code → Footer**, paste this code bef
 (() => {
   if (document.querySelector('[data-cloudflare-loader]')) return
 
-  const DEV_URL = 'https://community.studioprimal.com/main.js'
-  const CDN_URL = 'https://cdn.jsdelivr.net/gh/LukasJurcik/Community@main/main.js'
+  const DEV_URL = 'https://byeribalance.studioprimal.com/main.js'
+  const CDN_URL = 'https://cdn.jsdelivr.net/gh/LukasJurcik/byeribalance@main/main.js'
 
   const loadScript = (url, label, onError) => {
     const script = document.createElement('script')
@@ -121,9 +88,9 @@ In **Webflow → Site settings → Custom code → Footer**, paste this code bef
 
 Publish the Webflow site after changing the custom code.
 
-## 6. Switch to production mode
+### Switch to production mode
 
-When the code is final and has been pushed to GitHub, replace the development loader above with this CDN-only loader. This removes the Cloudflare Tunnel dependency from the published Webflow site:
+When the code is final and pushed to GitHub, replace the loader above with this CDN-only version. This removes the local dependency from the published Webflow site:
 
 ```html
 <!--
@@ -132,7 +99,7 @@ When the code is final and has been pushed to GitHub, replace the development lo
 -->
 <script>
 (() => {
-  const CDN_URL = 'https://cdn.jsdelivr.net/gh/LukasJurcik/Community@main/main.js'
+  const CDN_URL = 'https://cdn.jsdelivr.net/gh/LukasJurcik/byeribalance@main/main.js'
   const script = document.createElement('script')
   script.src = `${CDN_URL}?t=${Date.now()}`
   script.defer = true
@@ -150,22 +117,10 @@ Before switching to production mode:
 3. Replace the development loader in Webflow with the CDN-only loader above.
 4. Publish the Webflow site.
 
-The Cloudflare Tunnel can then be stopped. To resume local testing later, replace the CDN-only loader with the development loader again.
+The local server can then be stopped. To resume local testing later, replace the CDN-only loader with the development loader again and restart the Python server.
 
-## Daily workflow
+## Troubleshooting
 
-Each time you start working:
-
-```bash
-cd ~/Desktop/Community
-python3 -m http.server 5500
-```
-
-Then:
-
-1. Keep the Terminal window running.
-2. Edit `main.js` in VS Code.
-3. Refresh the Webflow site.
-4. Stop the server when finished by pressing `Control + C` in that Terminal window. Webflow will then fall back to the CDN version.
-
-A VS Code Live Server extension is optional. If used, configure it to use port `5500` and do not run it at the same time as Python's server.
+- **"cloudflared service is already installed" error:** don't uninstall/reinstall the service. Add a route to the existing `tunnel` tunnel instead (see "Adding a new project to the tunnel" above).
+- **Cloudflare error 1033 ("unable to resolve"):** the DNS record for your subdomain points at a tunnel that no longer exists (often left over from an old, deleted tunnel). Delete that DNS record, then re-save the route in **Tunnels → tunnel → Routes** to recreate it correctly.
+- **"An A, AAAA, or CNAME record with that host already exists":** an old DNS record for that subdomain is in the way. Find it under **Domains → studioprimal.com → DNS → Records** and delete it, then re-add the route.
