@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude_ai_Webflow__webflow_guide_tool",
+      "mcp__claude_ai_Webflow__designer_tool",
+      "mcp__claude_ai_Webflow__data_style_tool"
+    ]
+  }
+}
