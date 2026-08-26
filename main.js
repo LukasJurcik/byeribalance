@@ -1124,3 +1124,65 @@ if (document.readyState === 'loading') {
 } else {
   initLogoFade()
 }
+
+// ============================================
+// LOGO WALL COLUMNS (alphabetical letter groups)
+// Grid/flex-wrap can't do this without leaving a gap, because every
+// column in a row is forced to share that row's height. Instead we
+// physically deal the letter groups into N independent column boxes
+// (item 1 -> col 1, item 2 -> col 2, ... wrapping back to col 1), the
+// same round-robin order as the design mockups, so each column just
+// stacks its own content with no height synced to its neighbors, and
+// reading row by row still goes in alphabetical order. Redone on every
+// breakpoint change since the grouping itself (not just the styling)
+// has to change between 3 / 2 / 1 columns.
+// ============================================
+
+function initLogoWallColumns() {
+  const wrapper = document.querySelector('[data-logo-wall-groups]')
+  if (!wrapper) return
+
+  // Captured once, in original alphabetical order — every rebuild reuses
+  // this same list, not whatever order the DOM happens to be in right now
+  const groups = Array.from(wrapper.querySelectorAll('[data-logo-wall-group]'))
+  if (!groups.length) return
+
+  // The columns handle their own width via flex, so the wrapper should
+  // never wrap a column onto a second line
+  wrapper.style.flexWrap = 'nowrap'
+
+  const rebuild = (columnCount) => {
+    // Reuse the existing Designer class instead of inventing styles here —
+    // padding, width per breakpoint, flex behavior all stay editable in
+    // Webflow's Style panel rather than hardcoded in this script
+    const columns = Array.from({ length: columnCount }, () => {
+      const column = document.createElement('div')
+      column.className = 'logo-wall_column-wrapper'
+      return column
+    })
+
+    groups.forEach((group, i) => columns[i % columnCount].appendChild(group))
+
+    wrapper.replaceChildren(...columns)
+  }
+
+  const mm = gsap.matchMedia()
+
+  mm.add(
+    {
+      isDesktop: '(min-width: 992px)',
+      isTablet: '(min-width: 768px) and (max-width: 991px)',
+      isMobile: '(max-width: 767px)',
+    },
+    (context) => {
+      const { isDesktop, isTablet } = context.conditions
+      rebuild(isDesktop ? 3 : isTablet ? 2 : 1)
+    }
+  )
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLogoWallColumns)
+} else {
+  initLogoWallColumns()
+}
