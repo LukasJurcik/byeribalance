@@ -916,3 +916,211 @@ if (document.readyState === 'loading') {
 } else {
   initBunnyLightboxPlayer()
 }
+
+// ============================================
+// LOGO FADE CAROUSEL (CMS-driven)
+// How many logos show at once is read from data-logo-visible-desktop /
+// -tablet / -mobile attributes on the wrapper, so a designer can tune it
+// per breakpoint in Webflow without touching this file. Every slot tracks
+// which logo (by pool index) it's currently showing, so the rotation can
+// always pick a logo that isn't visible anywhere else right now. Each
+// visual row runs its own randomly-timed, randomly-positioned rotation,
+// so it reads as organic rather than a mechanical sweep.
+// ============================================
+
+function initLogoFade() {
+  const fadeDuration = 0.5
+  const holdTime = 2
+
+  const wrapper = document.querySelector('[data-logo-fade-wrapper]')
+  const allLogos = Array.from(document.querySelectorAll('[data-logo-fade="true"]'))
+  if (!wrapper || !allLogos.length) return
+
+  // Master list of every logo, in original CMS order — captured once so
+  // it stays correct as a reference point no matter how much rotation
+  // has since scrambled what each <img> element currently shows
+  const pool = allLogos.map((img) => ({
+    src: img.getAttribute('src'),
+    srcset: img.getAttribute('srcset'),
+    sizes: img.getAttribute('sizes'),
+    alt: img.getAttribute('alt') || '',
+  }))
+
+  const setOrRemoveAttr = (img, name, value) => {
+    if (value) img.setAttribute(name, value)
+    else img.removeAttribute(name)
+  }
+
+  let activeTimeouts = []
+  let activeTimelines = []
+  let resumeTicking = null
+
+  // Background tabs throttle setTimeout heavily (sometimes to a near-halt),
+  // so each row's next tick falls behind while the tab is hidden. Coming
+  // back would otherwise fire a backlog of overdue ticks all at once,
+  // which looks like every logo fading together. Pausing on hide and
+  // restarting with a fresh stagger on return avoids that pile-up.
+  const stopTicking = () => {
+    activeTimeouts.forEach((id) => clearTimeout(id))
+    activeTimeouts = []
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopTicking()
+    else resumeTicking?.()
+  })
+
+  const teardown = () => {
+    stopTicking()
+    // .kill() the timelines themselves — killTweensOf(img) only reaches
+    // the opacity tweens, not each timeline's .call() step (it has no
+    // target), which could otherwise still fire later and overwrite a
+    // slot we've just reset for the new breakpoint
+    activeTimelines.forEach((tl) => tl.kill())
+    activeTimelines = []
+    allLogos.forEach((img) => {
+      gsap.set(img, { opacity: 1 })
+      const item = img.closest('[data-logo-fade-item]')
+      if (item) item.style.display = ''
+    })
+  }
+
+  const setupForBreakpoint = (visibleCount) => {
+    if (allLogos.length <= visibleCount) return
+
+    const visibleLogos = allLogos.slice(0, visibleCount)
+
+    // Reset every slot back to its original logo first. A slot's element
+    // may still be holding a rotated-in logo left over from a previous
+    // breakpoint's setup (frozen in place while it was hidden), so we
+    // can't trust its current src — resetting guarantees every visible
+    // slot starts from a clean, unique baseline every time.
+    visibleLogos.forEach((img, i) => {
+      const original = pool[i]
+      img.setAttribute('src', original.src)
+      img.setAttribute('alt', original.alt)
+      setOrRemoveAttr(img, 'srcset', original.srcset)
+      setOrRemoveAttr(img, 'sizes', original.sizes)
+    })
+
+    // The extra CMS items only exist to feed the rotation pool —
+    // hide their grid cells so they don't add extra slots to the layout
+    allLogos.slice(visibleCount).forEach((img) => {
+      const item = img.closest('[data-logo-fade-item]')
+      if (item) item.style.display = 'none'
+    })
+
+    // Group visible slots into their visual rows (by on-screen top
+    // position) so each row can rotate independently of the others
+    const rows = []
+    visibleLogos.forEach((img, slot) => {
+      const top = Math.round(img.getBoundingClientRect().top)
+      let row = rows.find((r) => Math.abs(r.top - top) < 2)
+      if (!row) {
+        row = { top, slots: [] }
+        rows.push(row)
+      }
+      row.slots.push(slot)
+    })
+
+    const slotPoolIndex = visibleLogos.map((_, i) => i)
+    let nextCandidateIndex = visibleCount
+
+    const cycleSlot = (thisSlot) => {
+      const img = visibleLogos[thisSlot]
+
+      // Walk the pool from the logo that's waited longest, skipping
+      // anything currently shown in another slot
+      let candidateIndex = nextCandidateIndex % pool.length
+      while (slotPoolIndex.includes(candidateIndex)) {
+        candidateIndex = (candidateIndex + 1) % pool.length
+      }
+      const next = pool[candidateIndex]
+
+      console.log('[logo-fade] slot', thisSlot, ':', img.getAttribute('src').split('/').pop(), '->', next.src.split('/').pop())
+
+      // Reserve this candidate immediately (synchronously) — if we waited
+      // until the .call() below, a different row's tick firing in the
+      // meantime (the fade takes fadeDuration*2 to finish) would still see
+      // this index as free and could pick the same logo for another slot
+      slotPoolIndex[thisSlot] = candidateIndex
+      nextCandidateIndex = candidateIndex + 1
+
+      const tl = gsap.timeline({
+        // Drop this timeline from the tracking list once it finishes on
+        // its own, so the list only ever holds still-running timelines
+        onComplete: () => {
+          activeTimelines = activeTimelines.filter((t) => t !== tl)
+        },
+      })
+      activeTimelines.push(tl)
+      tl.to(img, { opacity: 0, duration: fadeDuration, ease: 'power2.out' })
+        .call(() => {
+          img.setAttribute('src', next.src)
+          img.setAttribute('alt', next.alt)
+          // srcset/sizes take priority over src in the browser, so a logo
+          // with a stale srcset would keep rendering its old image
+          setOrRemoveAttr(img, 'srcset', next.srcset)
+          setOrRemoveAttr(img, 'sizes', next.sizes)
+        })
+        .to(img, { opacity: 1, duration: fadeDuration, ease: 'power2.out' })
+    }
+
+    const startTicking = () => {
+      rows.forEach((row, rowIndex) => {
+        let lastSlot = -1
+
+        const pickSlot = () => {
+          if (row.slots.length === 1) return row.slots[0]
+          let slot
+          do {
+            slot = row.slots[Math.floor(Math.random() * row.slots.length)]
+          } while (slot === lastSlot)
+          return slot
+        }
+
+        const tick = () => {
+          lastSlot = pickSlot()
+          cycleSlot(lastSlot)
+
+          // Jitter each row's own pace so the rows don't stay in lockstep
+          const jitter = holdTime * 1000 * (0.7 + Math.random() * 0.6)
+          activeTimeouts.push(setTimeout(tick, jitter))
+        }
+
+        // Stagger each row's start so they don't tick at the same time
+        activeTimeouts.push(setTimeout(tick, (holdTime * 1000 * rowIndex) / rows.length))
+      })
+    }
+
+    // Exposed so visibilitychange can restart ticking (freshly staggered,
+    // not resumed mid-backlog) for whichever breakpoint is currently active
+    resumeTicking = startTicking
+    startTicking()
+  }
+
+  const mm = gsap.matchMedia()
+
+  mm.add(
+    {
+      isDesktop: '(min-width: 992px)',
+      isTablet: '(min-width: 768px) and (max-width: 991px)',
+      isMobile: '(max-width: 767px)',
+    },
+    (context) => {
+      const { isDesktop, isTablet } = context.conditions
+      const attr = isDesktop ? 'data-logo-visible-desktop' : isTablet ? 'data-logo-visible-tablet' : 'data-logo-visible-mobile'
+      const visibleCount = Number(wrapper.getAttribute(attr)) || allLogos.length
+
+      setupForBreakpoint(visibleCount)
+
+      return () => teardown()
+    }
+  )
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLogoFade)
+} else {
+  initLogoFade()
+}
