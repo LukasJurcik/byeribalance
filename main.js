@@ -92,8 +92,16 @@ if (document.documentElement.classList.contains('stop-scroll')) {
 }
 
 // Always start at the top on load/refresh, even if the browser tried
-// to restore a previous scroll position
-window.lenis.scrollTo(0, { immediate: true })
+// to restore a previous scroll position — unless the URL points at a
+// section (e.g. /#contact), in which case jump straight there instead
+if (location.hash) {
+  const targetSection = document.querySelector(location.hash)
+  if (targetSection) {
+    window.lenis.scrollTo(targetSection, { immediate: true })
+  }
+} else {
+  window.lenis.scrollTo(0, { immediate: true })
+}
 
 // Wire Lenis into GSAP's ticker + ScrollTrigger (defined above)
 installLenisScrollTriggerBridge()
@@ -1419,4 +1427,433 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initMediaSetup)
 } else {
   initMediaSetup()
+}
+
+// ============================================
+// MOBILE NAV MENU (open/close by height)
+// ============================================
+
+function initMobileNav() {
+  const toggle = document.querySelector('[mobile-nav="true"]')
+  const menu = document.querySelector('[mobile-links="true"]')
+  if (!toggle || !menu) return
+
+  // Webflow's padding has to collapse to 0 alongside height, or a
+  // padding-sized strip lingers until the display:none snap at the end
+  const basePadding = {
+    top: getComputedStyle(menu).paddingTop,
+    bottom: getComputedStyle(menu).paddingBottom
+  }
+
+  let isOpen = false
+
+  const openMenu = () => {
+    isOpen = true
+    // padding snaps to its real value instantly, before the height is measured,
+    // so the measurement below reflects the true final size
+    gsap.set(menu, { display: 'flex', height: 'auto', paddingTop: basePadding.top, paddingBottom: basePadding.bottom })
+    const targetHeight = menu.offsetHeight
+    // handing GSAP a real number instead of the 'auto' keyword avoids the one-frame
+    // flash of the fully-open (tall, rounded) shape that 'auto' resolution causes
+    gsap.fromTo(menu, { height: 0 }, { height: targetHeight, duration: 0.4, ease: 'power2.out' })
+  }
+
+  const closeMenu = () => {
+    isOpen = false
+    gsap.to(menu, {
+      height: 0,
+      paddingTop: 0,
+      paddingBottom: 0,
+      duration: 0.4,
+      ease: 'power2.out',
+      onComplete: () => gsap.set(menu, { display: 'none' })
+    })
+  }
+
+  toggle.addEventListener('click', () => {
+    isOpen ? closeMenu() : openMenu()
+  })
+
+  // clicking a link closes the menu too — guarded by isOpen so a desktop
+  // click (where the menu is never "open") never touches this shared element
+  menu.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', () => {
+      if (isOpen) closeMenu()
+    })
+  })
+
+  // closes the menu as soon as the page starts scrolling again
+  window.lenis?.on('scroll', () => {
+    if (isOpen) closeMenu()
+  })
+
+  // only collapse/expand by height below the tablet breakpoint — on desktop
+  // the links stay a plain row and the hamburger is hidden anyway
+  gsap.matchMedia().add('(max-width: 991px)', () => {
+    gsap.set(menu, { height: 0, paddingTop: 0, paddingBottom: 0, overflow: 'hidden' })
+    return () => gsap.set(menu, { clearProps: 'height,paddingTop,paddingBottom,overflow,display' })
+  })
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initMobileNav)
+} else {
+  initMobileNav()
+}
+
+// ============================================
+// FLOATING NAV ON SCROLL
+// ============================================
+
+function initFloatingNav() {
+  const navBar = document.querySelector('[data-nav-bar]')
+  const navLogo = document.querySelector('[data-nav-logo]')
+  if (!navBar) return
+
+  ScrollTrigger.create({
+    trigger: document.body,
+    start: 'top -24', // fires once the page has scrolled 24px down
+    end: 99999,
+    toggleClass: { targets: [navBar, navLogo].filter(Boolean), className: 'nav-scrolled' }
+  })
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initFloatingNav)
+} else {
+  initFloatingNav()
+}
+
+// ============================================
+// OVERLAY / MODAL
+// Used for the Cases grid, where each CMS card renders its own trigger +
+// overlay pair — so this sets each pair up independently instead of just
+// grabbing the first one on the page. The overlay's own parent element is
+// the CMS item wrapper it shares with its trigger, so that's used as the
+// scope. If a card has no trigger of its own (some CMS items don't render
+// one), its overlay simply has nothing to open it — it must NOT fall back
+// to searching further up the DOM, or it ends up grabbing every other
+// card's trigger too and opening on top of whichever one was clicked.
+//
+// data-overlay-trigger="true" opens the overlay, data-overlay-close="true"
+// closes it. That close attribute lives on both the overlay background and
+// the dedicated close button inside data-overlay-content, so a background
+// click is only ignored when it actually landed inside the content box —
+// that's what stops clicking the modal's own content from closing it,
+// while still letting the close button (even via its icon) work normally.
+// ============================================
+
+function initOverlays() {
+  const overlays = document.querySelectorAll('[data-overlay="true"]')
+
+  overlays.forEach(overlay => {
+    const scope = overlay.parentElement
+    if (!scope) return
+
+    const content = overlay.querySelector('[data-overlay-content="true"]')
+    const openTriggers = scope.querySelectorAll('[data-overlay-trigger="true"]')
+    const closeTriggers = scope.querySelectorAll('[data-overlay-close="true"]')
+
+    // starts hidden; opening switches it to flex (matches the "hidden by
+    // default, flex when shown" display setup already on the element)
+    gsap.set(overlay, { display: 'none', autoAlpha: 0 })
+    if (content) gsap.set(content, { autoAlpha: 0, y: 20 })
+
+    const openOverlay = () => {
+      window.lenis?.stop()
+      gsap.set(overlay, { display: 'flex' })
+
+      const tl = gsap.timeline()
+      tl.to(overlay, { autoAlpha: 1, duration: 0.4, ease: 'power2.out' }, 0)
+      if (content) tl.to(content, { autoAlpha: 1, y: 0, duration: 0.4, ease: 'power2.out' }, 0.1)
+    }
+
+    const closeOverlay = () => {
+      window.lenis?.start()
+
+      const tl = gsap.timeline({ onComplete: () => gsap.set(overlay, { display: 'none' }) })
+      if (content) tl.to(content, { autoAlpha: 0, y: 20, duration: 0.3, ease: 'power2.out' }, 0)
+      tl.to(overlay, { autoAlpha: 0, duration: 0.3, ease: 'power2.out' }, 0.1)
+    }
+
+    openTriggers.forEach(trigger => trigger.addEventListener('click', openOverlay))
+
+    closeTriggers.forEach(trigger => {
+      trigger.addEventListener('click', e => {
+        if (trigger === overlay && content?.contains(e.target)) return
+        closeOverlay()
+      })
+    })
+  })
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initOverlays)
+} else {
+  initOverlays()
+}
+
+// ============================================
+// EXPANDING FEATURE PILLS
+// A row of collapsed "pill" buttons that expand in place when clicked,
+// revealing more content and syncing an optional visual panel alongside
+// them. Widths/heights are measured live (off the real DOM, with the
+// expanded width pulled from a CSS variable) so the animation always
+// matches whatever content and breakpoint is currently showing.
+// ============================================
+
+function initExpandingFeaturePills() {
+  const wraps = document.querySelectorAll('[data-feature-pills-init]')
+  if (!wraps.length) return
+
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  wraps.forEach((wrap, wrapIdx) => {
+    const items = Array.from(wrap.querySelectorAll('[data-feature-pills-item]'))
+    const visuals = Array.from(wrap.querySelectorAll('[data-feature-pills-visual]'))
+    const cover = wrap.querySelector('[data-feature-pills-cover]')
+    const closeBtn = wrap.querySelector('[data-feature-pills-close]')
+    if (!items.length) return
+
+    if (visuals.length && visuals.length !== items.length) {
+      console.warn(`[ExpandingFeaturePills] items (${items.length}) and visuals (${visuals.length}) mismatch in module #${wrapIdx}. Visual syncing uses index order.`)
+    }
+
+    const uidBase = `feature-pills-${wrapIdx}`
+    const ease = 'back.out(2)'
+    const animationDuration = 0.5
+
+    const getExpandedWidth = () => getComputedStyle(wrap).getPropertyValue('--content-item-expanded').trim() || ''
+
+    const getActiveIndex = () => {
+      const active = items.find(it => it.getAttribute('data-active') === 'true')
+      return active ? Number(active.getAttribute('data-feature-pills-index')) : null
+    }
+
+    const setWrapActive = isActive => {
+      wrap.setAttribute('data-feature-pills-active', isActive ? 'true' : 'false')
+      if (closeBtn) closeBtn.setAttribute('aria-hidden', isActive ? 'false' : 'true')
+      if (cover) {
+        cover.setAttribute('data-active', isActive ? 'false' : 'true')
+        cover.setAttribute('aria-hidden', isActive ? 'true' : 'false')
+      }
+    }
+
+    const setVisualActive = indexOrNull => {
+      if (!visuals.length) return
+      visuals.forEach(v => {
+        const idx = Number(v.getAttribute('data-feature-pills-index'))
+        const isActive = indexOrNull !== null && idx === indexOrNull
+        v.setAttribute('data-active', isActive ? 'true' : 'false')
+        v.setAttribute('aria-hidden', isActive ? 'false' : 'true')
+      })
+    }
+
+    const setItemA11y = (item, isOpen) => {
+      const btn = item.querySelector('[data-feature-pills-button]')
+      const content = item.querySelector('[data-feature-pills-content]')
+      if (!btn || !content) return
+      btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false')
+      content.setAttribute('aria-hidden', isOpen ? 'false' : 'true')
+    }
+
+    const measureButtonH = item => {
+      const btn = item.querySelector('[data-feature-pills-button]')
+      return btn ? Math.ceil(btn.getBoundingClientRect().height) : 0
+    }
+
+    const measureInnerH = (item, expandedW) => {
+      const inner = item.querySelector('[data-feature-pills-inner]')
+      if (!inner) return 0
+
+      const mask = item.querySelector('.feature-pills__item-mask')
+
+      const prevMaskOverflow = mask ? mask.style.overflow : null
+      if (mask) mask.style.overflow = 'visible'
+
+      const prevMaxW = inner.style.maxWidth
+      if (expandedW) inner.style.maxWidth = expandedW
+
+      const h = Math.ceil(inner.getBoundingClientRect().height)
+
+      if (expandedW) inner.style.maxWidth = prevMaxW || ''
+      if (mask) mask.style.overflow = prevMaskOverflow || ''
+
+      return h
+    }
+
+    const getHeights = (item, expandedW) => {
+      const buttonH = measureButtonH(item)
+      const innerH = measureInnerH(item, expandedW)
+      const openH = Math.max(buttonH, innerH)
+      return { buttonH, openH }
+    }
+
+    const collapsedWidthPx = new Map()
+
+    const captureCollapsedWidths = () => {
+      items.forEach(item => {
+        const prev = item.style.width
+        item.style.width = ''
+        collapsedWidthPx.set(item, Math.ceil(item.getBoundingClientRect().width))
+        item.style.width = prev
+      })
+    }
+
+    const animateBox = (el, vars) => {
+      gsap.killTweensOf(el)
+      if (prefersReducedMotion) {
+        if (vars.height != null) el.style.height = `${vars.height}px`
+        if (vars.width != null) el.style.width = typeof vars.width === 'number' ? `${vars.width}px` : vars.width
+        return
+      }
+      gsap.to(el, { ...vars, duration: animationDuration, ease, overwrite: true })
+    }
+
+    const openItem = item => {
+      const expandedW = getExpandedWidth()
+      const { openH } = getHeights(item, expandedW)
+
+      item.setAttribute('data-active', 'true')
+      setItemA11y(item, true)
+      setWrapActive(true)
+
+      const targetW = expandedW || `${collapsedWidthPx.get(item) || Math.ceil(item.getBoundingClientRect().width)}px`
+      animateBox(item, { height: openH, width: targetW })
+    }
+
+    const closeItem = item => {
+      const expandedW = getExpandedWidth()
+      const { buttonH } = getHeights(item, expandedW)
+
+      item.setAttribute('data-active', 'false')
+      setItemA11y(item, false)
+
+      const targetW = collapsedWidthPx.get(item) || Math.ceil(item.getBoundingClientRect().width)
+      animateBox(item, { height: buttonH, width: targetW })
+    }
+
+    const switchTo = nextIndex => {
+      const current = getActiveIndex()
+      if (current === nextIndex) return
+
+      const nextItem = items[nextIndex]
+      if (!nextItem) return
+
+      if (current !== null) closeItem(items[current])
+      openItem(nextItem)
+
+      setVisualActive(nextIndex)
+    }
+
+    const closeAll = () => {
+      const current = getActiveIndex()
+      if (current === null) return
+      closeItem(items[current])
+      setVisualActive(null)
+      setWrapActive(false)
+    }
+
+    items.forEach((item, i) => {
+      item.setAttribute('data-feature-pills-index', String(i))
+      if (!item.hasAttribute('data-active')) item.setAttribute('data-active', 'false')
+
+      const btn = item.querySelector('[data-feature-pills-button]')
+      const content = item.querySelector('[data-feature-pills-content]')
+      if (btn) {
+        btn.setAttribute('data-feature-pills-index', String(i))
+        btn.type = 'button'
+        const triggerId = `${uidBase}-trigger-${i}`
+        if (!btn.id) btn.id = triggerId
+      }
+      if (content && btn) {
+        content.setAttribute('data-feature-pills-index', String(i))
+        const panelId = `${uidBase}-panel-${i}`
+        if (!content.id) content.id = panelId
+        btn.setAttribute('aria-controls', content.id)
+        content.setAttribute('role', 'region')
+        content.setAttribute('aria-labelledby', btn.id)
+        if (!content.hasAttribute('aria-hidden')) content.setAttribute('aria-hidden', 'true')
+        if (!btn.hasAttribute('aria-expanded')) btn.setAttribute('aria-expanded', 'false')
+      }
+    })
+
+    visuals.forEach((v, i) => v.setAttribute('data-feature-pills-index', String(i)))
+
+    if (closeBtn) {
+      closeBtn.type = 'button'
+      if (!closeBtn.hasAttribute('aria-hidden')) closeBtn.setAttribute('aria-hidden', 'true')
+      closeBtn.addEventListener('click', closeAll)
+    }
+
+    items.forEach(item => {
+      const h = measureButtonH(item)
+      item.style.height = `${h}px`
+    })
+
+    setWrapActive(false)
+    setVisualActive(null)
+
+    items.forEach((item, i) => {
+      const btn = item.querySelector('[data-feature-pills-button]')
+      if (!btn) return
+      btn.addEventListener('click', () => switchTo(i))
+    })
+
+    wrap.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeAll()
+    })
+
+    const debounce = (fn, wait = 150) => {
+      let t
+      return (...args) => {
+        clearTimeout(t)
+        t = setTimeout(() => fn(...args), wait)
+      }
+    }
+
+    const handleResize = () => {
+      const current = getActiveIndex()
+
+      items.forEach(item => {
+        if (item.getAttribute('data-active') !== 'true') item.style.width = ''
+      })
+
+      captureCollapsedWidths()
+
+      if (current !== null) {
+        const item = items[current]
+        const expandedW = getExpandedWidth()
+        const { openH } = getHeights(item, expandedW)
+        const targetW = expandedW || ''
+
+        if (prefersReducedMotion) {
+          item.style.height = `${openH}px`
+          if (targetW) item.style.width = targetW
+        } else {
+          const fallbackW = `${Math.ceil(item.getBoundingClientRect().width)}px`
+          const widthForActive = targetW || fallbackW
+
+          gsap.set(item, { height: openH, width: widthForActive })
+          if (targetW) item.style.width = targetW
+        }
+      } else {
+        items.forEach(item => {
+          const h = measureButtonH(item)
+          item.style.height = `${h}px`
+        })
+      }
+    }
+
+    const debouncedResize = debounce(handleResize, 200)
+
+    captureCollapsedWidths()
+    window.addEventListener('resize', debouncedResize, { passive: true })
+  })
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initExpandingFeaturePills)
+} else {
+  initExpandingFeaturePills()
 }
