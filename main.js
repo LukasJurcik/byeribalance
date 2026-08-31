@@ -83,7 +83,11 @@ window.lenis = new window.Lenis({
   autoRaf: false,
   lerp: 0.2,
   smoothWheel: true,
-  smoothTouch: true
+  smoothTouch: true,
+  // skip Lenis's smooth-scroll handling on anything marked
+  // data-lenis-prevent (e.g. scrollable overlay content) so wheel/trackpad
+  // scrolling works normally inside those elements
+  prevent: node => node.closest('[data-lenis-prevent]')
 })
 
 // If stop-scroll is active (from loader in head), keep Lenis stopped
@@ -1557,7 +1561,15 @@ function initOverlays() {
     // starts hidden; opening switches it to flex (matches the "hidden by
     // default, flex when shown" display setup already on the element)
     gsap.set(overlay, { display: 'none', autoAlpha: 0 })
-    if (content) gsap.set(content, { autoAlpha: 0, y: 20 })
+    // overflowY here lets content taller than the max-height (set in Webflow)
+    // scroll internally instead of getting clipped. data-lenis-prevent tells
+    // Lenis to leave wheel/trackpad scrolling on this element alone — without
+    // it Lenis swallows the scroll for its own smooth-scroll effect and the
+    // content never moves, even though the scrollbar is there and draggable
+    if (content) {
+      gsap.set(content, { autoAlpha: 0, y: 20, overflowY: 'auto' })
+      content.setAttribute('data-lenis-prevent', '')
+    }
 
     const openOverlay = () => {
       window.lenis?.stop()
