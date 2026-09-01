@@ -1042,9 +1042,12 @@ function initLogoFade() {
       const img = visibleLogos[thisSlot]
 
       // Walk the pool from the logo that's waited longest, skipping
-      // anything currently shown in another slot
+      // anything currently shown in another slot. Compared by src rather
+      // than pool index — if the CMS happens to list the same logo image
+      // twice under different entries, this still keeps it from showing
+      // in two slots at once
       let candidateIndex = nextCandidateIndex % pool.length
-      while (slotPoolIndex.includes(candidateIndex)) {
+      while (slotPoolIndex.some((idx) => pool[idx].src === pool[candidateIndex].src)) {
         candidateIndex = (candidateIndex + 1) % pool.length
       }
       const next = pool[candidateIndex]
@@ -1648,6 +1651,11 @@ function initExpandingFeaturePills() {
       if (cover) {
         cover.setAttribute('data-active', isActive ? 'false' : 'true')
         cover.setAttribute('aria-hidden', isActive ? 'true' : 'false')
+        // The cover sits absolutely positioned with z-index:1 above the visual
+        // collection at all times — hiding it doesn't stop it from catching
+        // clicks/hovers meant for the play button underneath unless pointer
+        // events are turned off too
+        cover.style.pointerEvents = isActive ? 'none' : 'auto'
       }
     }
 
@@ -1658,6 +1666,11 @@ function initExpandingFeaturePills() {
         const isActive = indexOrNull !== null && idx === indexOrNull
         v.setAttribute('data-active', isActive ? 'true' : 'false')
         v.setAttribute('aria-hidden', isActive ? 'false' : 'true')
+        // Visual items are stacked with position:absolute and no z-index, so
+        // DOM order decides who's on top — an inactive (opacity:0) item later
+        // in the CMS list would otherwise sit above the active one and steal
+        // clicks/hovers meant for its play button
+        v.style.pointerEvents = isActive ? 'auto' : 'none'
       })
     }
 
