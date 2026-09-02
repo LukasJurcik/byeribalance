@@ -1176,7 +1176,29 @@ function initLogoWallColumns() {
       return column
     })
 
-    groups.forEach((group, i) => columns[i % columnCount].appendChild(group))
+    if (columnCount <= 2) {
+      // Round-robin (group 1 -> col A, group 2 -> col B, ...) assumes every
+      // group has roughly the same number of logos. Letter groups don't —
+      // "S" might have 8 logos, "W" might have 1 — so with few columns that
+      // imbalance is very visible as one column running much longer than
+      // the other. Instead each group goes into whichever column currently
+      // holds the fewest logos. Groups stay in alphabetical order
+      // top-to-bottom within their column, but columns end up close to
+      // even height. At 3+ columns the imbalance averages out enough that
+      // the original round-robin (matching the design mockups' row-by-row
+      // reading order) is kept as-is.
+      const columnLogoCounts = new Array(columnCount).fill(0)
+
+      groups.forEach((group) => {
+        const logoCount = group.querySelectorAll('img').length
+        const shortestColumn = columnLogoCounts.indexOf(Math.min(...columnLogoCounts))
+
+        columns[shortestColumn].appendChild(group)
+        columnLogoCounts[shortestColumn] += logoCount
+      })
+    } else {
+      groups.forEach((group, i) => columns[i % columnCount].appendChild(group))
+    }
 
     wrapper.replaceChildren(...columns)
   }
@@ -1191,7 +1213,11 @@ function initLogoWallColumns() {
     },
     (context) => {
       const { isDesktop, isTablet } = context.conditions
-      rebuild(isDesktop ? 3 : isTablet ? 2 : 1)
+      const attr = isDesktop ? 'data-logo-wall-columns-desktop' : isTablet ? 'data-logo-wall-columns-tablet' : 'data-logo-wall-columns-mobile'
+      const fallback = isDesktop ? 3 : isTablet ? 2 : 1
+      const columnCount = Number(wrapper.getAttribute(attr)) || fallback
+
+      rebuild(columnCount)
     }
   )
 }
@@ -1453,9 +1479,16 @@ function initMobileNav() {
   }
 
   let isOpen = false
+  let openedAt = 0
+  // Lenis eases toward the scroll target instead of snapping to it, so it keeps firing
+  // 'scroll' events for a bit after the user's actual scroll input has stopped. Without this
+  // grace period, opening the menu right after a scroll (or a same-page anchor jump) gets
+  // immediately undone by one of those leftover events.
+  const SCROLL_CLOSE_GRACE_MS = 350
 
   const openMenu = () => {
     isOpen = true
+    openedAt = performance.now()
     // padding snaps to its real value instantly, before the height is measured,
     // so the measurement below reflects the true final size
     gsap.set(menu, { display: 'flex', height: 'auto', paddingTop: basePadding.top, paddingBottom: basePadding.bottom })
@@ -1491,7 +1524,9 @@ function initMobileNav() {
 
   // closes the menu as soon as the page starts scrolling again
   window.lenis?.on('scroll', () => {
-    if (isOpen) closeMenu()
+    if (!isOpen) return
+    if (performance.now() - openedAt < SCROLL_CLOSE_GRACE_MS) return
+    closeMenu()
   })
 
   // only collapse/expand by height below the tablet breakpoint — on desktop
