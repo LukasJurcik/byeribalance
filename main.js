@@ -1589,6 +1589,9 @@ function initOverlays() {
   const overlays = document.querySelectorAll('[data-overlay="true"]')
 
   overlays.forEach(overlay => {
+    // the contact panel has its own overlay handling (initContactPanel) — skip it here
+    if (overlay.closest('[data-modal-wrapper="true"]')) return
+
     const scope = overlay.parentElement
     if (!scope) return
 
@@ -1916,4 +1919,115 @@ if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initExpandingFeaturePills)
 } else {
   initExpandingFeaturePills()
+}
+
+// ============================================
+// CONTACT PANEL
+// ============================================
+// Opens on [contact-panel-trigger="true"], lives inside [data-modal-wrapper="true"],
+// fades/tints its [data-overlay="true"] backdrop, and closes on [data-close-button="true"].
+
+function initContactPanel() {
+  const box = document.querySelector('[contact-panel="true"]')
+  if (!box) return
+
+  const panel = box.closest('[data-modal-wrapper="true"]')
+  if (!panel) return
+
+  const overlay = panel.querySelector('[data-overlay="true"]')
+  const openTriggers = document.querySelectorAll('[contact-panel-trigger="true"]')
+  const closeTriggers = panel.querySelectorAll('[data-close-button="true"]')
+  const hiddenState = { yPercent: 20, autoAlpha: 0 }
+
+  gsap.set(panel, { autoAlpha: 1 })
+  gsap.set(box, hiddenState)
+
+  // fade the overlay's tint, not its opacity, so the box nested inside it isn't affected
+  let overlayVisibleColor = null
+  let overlayHiddenColor = null
+  if (overlay) {
+    const [r, g, b, a = 1] = getComputedStyle(overlay).backgroundColor.match(/[\d.]+/g)
+    overlayVisibleColor = `rgba(${r}, ${g}, ${b}, ${a})`
+    overlayHiddenColor = `rgba(${r}, ${g}, ${b}, 0)`
+    gsap.set(overlay, { backgroundColor: overlayHiddenColor })
+  }
+
+  const openPanel = () => {
+    window.lenis?.stop()
+    gsap.set(panel, { display: 'block' })
+    if (overlay) gsap.set(overlay, { display: 'flex' })
+
+    const tl = gsap.timeline()
+    if (overlay) tl.to(overlay, { backgroundColor: overlayVisibleColor, duration: 0.5, ease: 'power1.out' }, 0)
+    tl.to(box, { yPercent: 0, autoAlpha: 1, duration: 0.4, ease: 'power2.out' }, 0)
+  }
+
+  const closePanel = () => {
+    window.lenis?.start()
+
+    const tl = gsap.timeline({
+      onComplete: () => {
+        gsap.set(panel, { display: 'none' })
+        if (overlay) gsap.set(overlay, { display: 'none' })
+      }
+    })
+    if (overlay) tl.to(overlay, { backgroundColor: overlayHiddenColor, duration: 0.5, ease: 'power1.out' }, 0)
+    tl.to(box, { ...hiddenState, duration: 0.4, ease: 'power2.out' }, 0)
+  }
+
+  openTriggers.forEach(trigger => trigger.addEventListener('click', openPanel))
+
+  // only close if the click landed directly on the trigger, not something bubbling up from inside it
+  closeTriggers.forEach(trigger => {
+    trigger.addEventListener('click', e => {
+      if (e.target !== trigger) return
+      closePanel()
+    })
+  })
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initContactPanel)
+} else {
+  initContactPanel()
+}
+
+// ============================================
+// COPY TO CLIPBOARD
+// ============================================
+
+function initCopyToClipboard() {
+  document.querySelectorAll('[data-text="copy"]').forEach(el => {
+    // scoped to this element's own CMS item, so clicking one card's copy button
+    // doesn't show every other card's toast message too
+    const wrapper = el.closest('[data-copy-item="true"]')
+    const message = wrapper?.querySelector('[data-copy-message]')
+
+    if (message) gsap.set(message, { display: 'none', opacity: 0, y: '0.5rem' })
+
+    el.addEventListener('click', () => {
+      // textContent pulls only text nodes, skipping SVG/other markup
+      const text = el.textContent.trim().replace(/\s+/g, ' ')
+
+      navigator.clipboard.writeText(text)
+        .then(() => console.log('Copied:', text))
+        .catch(err => console.error('Copy failed:', err))
+
+      if (!message) return
+
+      gsap.killTweensOf(message)
+      gsap.timeline()
+        .set(message, { display: 'block' })
+        .to(message, { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out' })
+        // '+=0.5' tells GSAP to wait 0.5s after the fade-in finishes before starting the fade-out — that's the "hold" time
+        .to(message, { opacity: 0, y: '0.5rem', duration: 0.3, ease: 'power2.in' }, '+=0.5')
+        .set(message, { display: 'none' })
+    })
+  })
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initCopyToClipboard)
+} else {
+  initCopyToClipboard()
 }
