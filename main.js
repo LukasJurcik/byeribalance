@@ -1612,9 +1612,19 @@ function initOverlays() {
       content.setAttribute('data-lenis-prevent', '')
     }
 
+    // each overlay gets a data-overlay-slug (the CMS item's slug, set in
+    // Webflow) — that's what ends up in the URL, e.g. /cases#mad-pa-bordet
+    const slug = overlay.getAttribute('data-overlay-slug')
+    let isOpen = false
+
     const openOverlay = () => {
+      if (isOpen) return
+      isOpen = true
+
       window.lenis?.stop()
       gsap.set(overlay, { display: 'flex' })
+      // replaceState changes the address bar without adding a history entry
+      if (slug) history.replaceState(null, '', `#${slug}`)
 
       const tl = gsap.timeline()
       tl.to(overlay, { autoAlpha: 1, duration: 0.4, ease: 'power2.out' }, 0)
@@ -1622,7 +1632,14 @@ function initOverlays() {
     }
 
     const closeOverlay = () => {
+      if (!isOpen) return
+      isOpen = false
+
       window.lenis?.start()
+      // only clear the hash if it's this overlay's — don't wipe another one's
+      if (slug && location.hash === `#${slug}`) {
+        history.replaceState(null, '', location.pathname + location.search)
+      }
 
       const tl = gsap.timeline({ onComplete: () => gsap.set(overlay, { display: 'none' }) })
       if (content) tl.to(content, { autoAlpha: 0, y: 20, duration: 0.3, ease: 'power2.out' }, 0)
@@ -1637,6 +1654,14 @@ function initOverlays() {
         closeOverlay()
       })
     })
+
+    // opens this overlay when the page loads with its slug in the URL, or when
+    // someone clicks a link to it while already on the page
+    const openIfInUrl = () => {
+      if (slug && location.hash === `#${slug}`) openOverlay()
+    }
+    openIfInUrl()
+    window.addEventListener('hashchange', openIfInUrl)
   })
 }
 
